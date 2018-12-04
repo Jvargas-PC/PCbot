@@ -1,7 +1,8 @@
 # PCBOT forked from: discord-image-downloader-go
 
-[Download the latest release](https://github.com/Seklfreak/discord-image-downloader-go/releases/latest)
-[Download the original manual for more information](https://github.com/Seklfreak/discord-image-downloader-go)
+[Download the latest release](https://github.com/Seklfreak/discord-image-downloader-go/releases/latest) 
+
+[Read the original manual for more information](https://github.com/Seklfreak/discord-image-downloader-go)
 
 ## Completly Discord complaiant functional now!
 
@@ -14,6 +15,7 @@ It also as well looks up using the SauceNao API for the title, artist and source
 1. Go to <https://discordapp.com/developers/applications/> Create an application and use the **BOT** token in the config.ini file 
 2. Add your bot to the necessary discord server to be hosted in using the tab **OAuth2** make sure the permissions have atleast read and write permissions.
 3. Fill out the config.ini file with other API keys needed for functionality.
+4. go to the main.go file and use `go run main.go` or build it if you desire
 
 *Strongly suggest to add the SauceNao API to make the bot happy while building it's database*
 
