@@ -25,6 +25,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bwmarrin/discordgo"
 	"github.com/hashicorp/go-version"
+	"github.com/GenDoNL/saucenao-go"
 	"golang.org/x/net/context"
 	"golang.org/x/net/html"
 	"golang.org/x/oauth2/google"
@@ -66,7 +67,40 @@ var (
 	clientCredentialsJson            string
 	DriveService                     *drive.Service
 	RegexpFilename                   *regexp.Regexp
+	SauceApiKey			 string
+	ResultQuery			 string
+	GlobalLastURL			 string
+	GlobalTitle			 string
 )
+//Constants moved from the external file into the MAIN.go file for reference purposes in REGEX
+const (
+	VERSION                          = "1.31.4"
+	DATABASE_DIR                     = "database"
+	RELEASE_URL                      = "https://github.com/Seklfreak/discord-image-downloader-go/releases/latest"
+	RELEASE_API_URL                  = "https://api.github.com/repos/Seklfreak/discord-image-downloader-go/releases/latest"
+	IMGUR_CLIENT_ID                  = "a39473314df3f59"
+	REGEXP_URL_TWITTER               = `^http(s?):\/\/pbs(-[0-9]+)?\.twimg\.com\/media\/[^\./]+\.(jpg|png)((\:[a-z]+)?)$`
+	REGEXP_URL_TWITTER_STATUS        = `^http(s?):\/\/(www\.)?twitter\.com\/([A-Za-z0-9-_\.]+\/status\/|statuses\/|i\/web\/status\/)([0-9]+)$`
+	REGEXP_URL_TISTORY               = `^http(s?):\/\/[a-z0-9]+\.uf\.tistory\.com\/(image|original)\/[A-Z0-9]+$`
+	REGEXP_URL_TISTORY_WITH_CDN      = `^http(s)?:\/\/[0-9a-z]+.daumcdn.net\/[a-z]+\/[a-zA-Z0-9\.]+\/\?scode=mtistory&fname=http(s?)%3A%2F%2F[a-z0-9]+\.uf\.tistory\.com%2F(image|original)%2F[A-Z0-9]+$`
+	REGEXP_URL_GFYCAT                = `^http(s?):\/\/gfycat\.com\/(gifs\/detail\/)?[A-Za-z]+$`
+	REGEXP_URL_INSTAGRAM             = `^http(s?):\/\/(www\.)?instagram\.com\/p\/[^/]+\/(\?[^/]+)?$`
+	REGEXP_URL_IMGUR_SINGLE          = `^http(s?):\/\/(i\.)?imgur\.com\/[A-Za-z0-9]+(\.gifv)?$`
+	REGEXP_URL_IMGUR_ALBUM           = `^http(s?):\/\/imgur\.com\/(a\/|gallery\/|r\/[^\/]+\/)[A-Za-z0-9]+(#[A-Za-z0-9]+)?$`
+	REGEXP_URL_GOOGLEDRIVE           = `^http(s?):\/\/drive\.google\.com\/file\/d\/[^/]+\/view$`
+	REGEXP_URL_GOOGLEDRIVE_FOLDER    = `^http(s?):\/\/drive\.google\.com\/(drive\/folders\/|open\?id=)([^/]+)$`
+	REGEXP_URL_POSSIBLE_TISTORY_SITE = `^http(s)?:\/\/[0-9a-zA-Z\.-]+\/(m\/)?(photo\/)?[0-9]+$`
+	REGEXP_URL_FLICKR_PHOTO          = `^http(s)?:\/\/(www\.)?flickr\.com\/photos\/([0-9]+)@([A-Z0-9]+)\/([0-9]+)(\/)?(\/in\/album-([0-9]+)(\/)?)?$`
+	REGEXP_URL_FLICKR_ALBUM          = `^http(s)?:\/\/(www\.)?flickr\.com\/photos\/(([0-9]+)@([A-Z0-9]+)|[A-Za-z0-9]+)\/(albums\/(with\/)?|(sets\/)?)([0-9]+)(\/)?$`
+	REGEXP_URL_FLICKR_ALBUM_SHORT    = `^http(s)?:\/\/((www\.)?flickr\.com\/gp\/[0-9]+@[A-Z0-9]+\/[A-Za-z0-9]+|flic\.kr\/s\/[a-zA-Z0-9]+)$`
+	REGEXP_URL_STREAMABLE            = `^http(s?):\/\/(www\.)?streamable\.com\/([0-9a-z]+)$`
+	REGEXP_FILENAME = `^^[^/\\:*?"<>|]{1,150}\.[A-Za-z0-9]{2,4}$$`
+
+	DEFAULT_CONFIG_FILE = "config.ini"
+)
+
+
+
 
 type GfycatObject struct {
 	GfyItem struct {
@@ -122,6 +156,8 @@ func main() {
 		cfg.Section("twitter").NewKey("consumer secret", "your consumer secret")
 		cfg.Section("twitter").NewKey("access token", "your access token")
 		cfg.Section("twitter").NewKey("access token secret", "your access token secret")
+		cfg.Section("sauce").NewKey("api key", "your saucenow api key")
+		
 		err = cfg.SaveTo("config.ini")
 
 		if err != nil {
@@ -147,16 +183,19 @@ func main() {
 			return
 		}
 	}
-
+	GlobalLastURL = "http://pcrules.ddns.net/images/1/6b6d3af6a0ebba38c5ae8114c4dab5eed574fb05.png" //any Image url to intialize
 	ChannelWhitelist = cfg.Section("channels").KeysHash()
 	InteractiveChannelWhitelist = cfg.Section("interactive channels").KeysHash()
 	interactiveChannelLinkTemp = make(map[string]string)
 	historyCommandActive = make(map[string]string)
+	SauceApiKey = cfg.Section("sauce").Key("api key").MustString("your saucenow api key")
 	flickrApiKey = cfg.Section("flickr").Key("api key").MustString("yourflickrapikey")
 	twitterConsumerKey := cfg.Section("twitter").Key("consumer key").MustString("your consumer key")
 	twitterConsumerSecret := cfg.Section("twitter").Key("consumer secret").MustString("your consumer secret")
 	twitterAccessToken := cfg.Section("twitter").Key("access token").MustString("your access token")
 	twitterAccessTokenSecret := cfg.Section("twitter").Key("access token secret").MustString("your access token secret")
+
+	
 	if twitterAccessToken != "" &&
 		twitterAccessTokenSecret != "" &&
 		twitterConsumerKey != "" &&
@@ -249,10 +288,11 @@ func main() {
 		fmt.Println("Regexp error", err)
 		return
 	}
-
+	//This allows the bot to run as an actual verified BOT for discord
 	if cfg.Section("auth").HasKey("token") {
-		dg, err = discordgo.New(cfg.Section("auth").Key("token").String())
+		dg, err = discordgo.New("Bot " + cfg.Section("auth").Key("token").String())
 	} else {
+	//This is now illegal to do under discord's new ToS but it's kept for legacy support
 		dg, err = discordgo.New(
 			cfg.Section("auth").Key("email").String(),
 			cfg.Section("auth").Key("password").String())
@@ -546,14 +586,18 @@ func handleDiscordMessage(m *discordgo.Message) {
 		}
 	} else if folderName, ok := InteractiveChannelWhitelist[m.ChannelID]; ok {
 		if DiscordUserId != "" && m.Author != nil && m.Author.ID != DiscordUserId {
-			dg.ChannelTyping(m.ChannelID)
+			//Depricated, Caused too many bugs with reading over the same channel as the images were posted
+			//dg.ChannelTyping(m.ChannelID)
 			message := strings.ToLower(m.Content)
 			_, historyCommandIsActive := historyCommandActive[m.ChannelID]
 			switch {
-			case message == "help":
+			case message == "w0lfy":
+				dg.ChannelMessageSend(m.ChannelID,
+					"<@193944161966227456> sucks >:^)\n https://i.imgur.com/v3YmXni.png") 
+			case message == "!help":
 				dg.ChannelMessageSend(m.ChannelID,
 					"**<link>** to download a link\n**version** to find out the version\n**stats** to view stats\n**channels** to list active channels\n**history** to download a full channel history\n**help** to open this help\n ")
-			case message == "version":
+			case message == "!version":
 				dg.ChannelMessageSend(m.ChannelID, fmt.Sprintf("discord-image-downloder-go **v%s**", VERSION))
 				dg.ChannelTyping(m.ChannelID)
 				if isLatestRelease() {
@@ -561,7 +605,37 @@ func handleDiscordMessage(m *discordgo.Message) {
 				} else {
 					dg.ChannelMessageSend(m.ChannelID, fmt.Sprintf("**update available on <%s>**", RELEASE_URL))
 				}
-			case message == "channels":
+			case message == "!sauce":
+				dg.ChannelMessageSend(m.ChannelID,
+					"Searching for source...\n")
+				SauceApiKey = fmt.Sprintf(SauceApiKey)
+				client := saucenao.New(SauceApiKey)
+				result, err := client.FromURL(GlobalLastURL)		  
+				if err != nil {
+					ResultQuery = fmt.Sprintf("Error finding source: %s", err)
+					dg.ChannelMessageSend(m.ChannelID, ResultQuery)
+					break
+				}
+				
+				GlobalTitle = fmt.Sprintf(result.Data[0].Data.Title)
+				
+				JapTranslate() //todo a japanese to english translator
+				
+				ResultQuery = fmt.Sprintf("Source found for : %s \nTitle: %s *%s* \nPixiv: %s (*%d*)\nDanbooru: %s  %s ", 
+				GlobalLastURL,
+				result.Data[0].Data.Title,
+				GlobalTitle,
+				result.Data[0].Data.MemberName, 
+				result.Data[0].Data.PixivId, 
+				result.Data[0].Data.Creator,
+				result.Data[0].Data.Source,
+				)
+			
+				
+				dg.ChannelMessageSend(m.ChannelID, ResultQuery)
+				
+				
+			case message == "!channels":
 				replyMessage := "**channels**\n"
 				for channelId, channelFolder := range ChannelWhitelist {
 					channel, err := dg.Channel(channelId)
@@ -601,7 +675,7 @@ func handleDiscordMessage(m *discordgo.Message) {
 				for _, page := range Pagify(replyMessage, "\n") {
 					dg.ChannelMessageSend(m.ChannelID, page)
 				}
-			case message == "stats":
+			case message == "!stats":
 				dg.ChannelTyping(m.ChannelID)
 				channelStats := make(map[string]int)
 				userStats := make(map[string]int)
@@ -667,7 +741,7 @@ func handleDiscordMessage(m *discordgo.Message) {
 				for _, page := range Pagify(replyMessage, "\n") {
 					dg.ChannelMessageSend(m.ChannelID, page)
 				}
-			case message == "history", historyCommandIsActive:
+			case message == "!history", historyCommandIsActive:
 				i := 0
 				_, historyCommandIsSet := historyCommandActive[m.ChannelID]
 				if !historyCommandIsSet || historyCommandActive[m.ChannelID] == "" {
@@ -791,7 +865,9 @@ func handleDiscordMessage(m *discordgo.Message) {
 						foundLinks = true
 					}
 					if foundLinks == false {
-						dg.ChannelMessageSend(m.ChannelID, "unable to find valid link")
+						//Buggy switch case default
+						//dg.ChannelMessageSend(m.ChannelID, "unable to find valid link") 
+						
 					}
 				}
 			}
@@ -1693,3 +1769,9 @@ func filepathExtension(filepath string) string {
 	}
 	return filepath
 }
+
+
+func JapTranslate() {
+		return //todo a machine that returns kanji to romanji
+}
+
